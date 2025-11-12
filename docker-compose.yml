@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    # НЕТ volumes - значит нет авто-перезагрузки
+    command: npm start
+
+# Автоматические бэкапы базы данных (docker-compose run --rm db-backup)
+  db-backup:
+    image: postgres:15
+    volumes:
+      - ./backups:/backups
+    environment:
+      - PGHOST=host.docker.internal
+      - PGDATABASE=pickadrive
+      - PGUSER=postgres
+      - PGPASSWORD=1
+    command: |
+      sh -c '
+        echo "🔄 Начинаем бэкап базы данных..."
+        pg_dump -Fc pickadrive > /backups/backup_$(date +%Y-%m-%d_%H-%M-%S).dump
+        echo "✅ Бэкап создан!"
+        exit 0
+      '
+    restart: "no"  # запускается только когда нужно

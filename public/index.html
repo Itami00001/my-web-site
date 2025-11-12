@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pick a Drive - Надёжный трансфер по Крыму и Москве</title>
+    <link rel="icon" type="image/png" href="piadlogopng.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <div class="logo">Pick a Drive</div>
+            <div class="nav-links">
+                <a href="#services">Услуги</a>
+                <a href="bus-selection.html">Выбрать автобус</a>
+                <a href="#order">Заказать</a>
+                <a href="#about">О нас</a>
+                <a href="#contact">Контакты</a>
+            </div>
+        </div>
+    </nav>
+
+    <header>
+        <div class="container">
+            <div class="hero">
+                <h1>Комфортные перевозки по Крыму и Москве</h1>
+                <p>Более 10 лет обеспечиваем безопасные и комфортные поездки</p>
+                <a href="bus-selection.html" class="cta-button">Выбрать автобус</a>
+            </div>
+        </div>
+    </header>
+
+    <section class="phone-section">
+        <div class="container">
+            <h2>Заказать автобус для трансфера</h2>
+            <div class="phone-numbers">
+                <a href="tel:+79788993722" class="phone-number">+7 (978) 899-37-22</a>
+                <a href="tel:+79789571399" class="phone-number">+7 (978) 957-13-99</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="services" class="services">
+        <div class="container">
+            <div class="section-title">
+                <h2>Наши Услуги</h2>
+                <p>Комфортные поездки для любых целей</p>
+            </div>
+            <div class="services-grid">
+                <div class="service-card">
+                    <div class="service-icon"><i class="fas fa-bus"></i></div>
+                    <h3>Групповые трансферы</h3>
+                    <p>Комфортабельные автобусы для групп любого размера</p>
+                </div>
+                <div class="service-card">
+                    <div class="service-icon"><i class="fas fa-car"></i></div>
+                    <h3>Индивидуальные поездки</h3>
+                    <p>Персональный трансфер для вас и вашей семьи</p>
+                </div>
+                <div class="service-card">
+                    <div class="service-icon"><i class="fas fa-suitcase"></i></div>
+                    <h3>Туристические маршруты</h3>
+                    <p>Экскурсии и поездки по достопримечательностям</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="order" class="order">
+        <div class="container">
+            <div class="section-title">
+                <h2>Заказать Перевозку</h2>
+                <p>Заполните форму, и мы свяжемся с вами в течение 15 минут</p>
+            </div>
+            
+            <div id="selectedBusInfo"></div>
+            
+            <form id="orderForm" class="contact-form">
+                <div class="form-group">
+                    <input type="text" name="name" id="name" placeholder="Ваше имя" required>
+                </div>
+                <div class="form-group">
+                    <input type="tel" name="phone" id="phone" placeholder="Ваш телефон" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" name="from" id="from" placeholder="Откуда" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" name="to" id="to" placeholder="Куда" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" name="dateTime" id="dateTime" placeholder="Дата и время" required>
+                </div>
+                <div class="form-group">
+                    <input type="number" name="passengers" id="passengers" placeholder="Количество пассажиров" required min="1">
+                </div>
+                <div class="form-group">
+                    <textarea name="request" id="request" placeholder="Дополнительные пожелания" rows="4"></textarea>
+                </div>
+                <button type="submit" class="submit-btn">Отправить заявку</button>
+            </form>
+        </div>
+    </section>
+
+    <section id="about" class="about">
+        <div class="container">
+            <h2>О нас</h2>
+            <p>Мы – команда профессионалов, предоставляющая услуги трансфера высокого уровня по городам Крыма и Москве.</p>
+        </div>
+    </section>
+
+    <div class="floating-icons">
+        <a href="https://wa.me/+79781289321" class="floating-icon whatsapp">
+            <i class="fab fa-whatsapp"></i>
+        </a>
+        <a href="https://web.telegram.org/a/#8054573188" class="floating-icon telegram">
+            <i class="fab fa-telegram"></i>
+        </a>
+        <a href="tel:+79788993722" class="floating-icon phone">
+            <i class="fas fa-phone"></i>
+        </a>
+    </div>
+
+    <footer id="contact">
+        <div class="container">
+            <p>Свяжитесь с нами: +7 (978) 899-37-22 | prikolporodii@gmail.com</p>
+            <p>&copy; 2025 Pick a Drive. Все права защищены.</p>
+        </div>
+    </footer>
+
+    <script src="pad.js"></script>
+</body>
+</html>

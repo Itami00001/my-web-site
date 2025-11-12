@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Выбор автобуса - Pick a Drive</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <a href="index.html" class="logo">Pick a Drive</a>
+            <a href="index.html" class="back-btn">← На главную</a>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Выберите автобус</h1>
+            <p>Комфортабельные автобусы с профессиональными водителями</p>
+        </div>
+    </header>
+
+    <section class="buses-section">
+        <div class="container">
+            <div class="buses-grid" id="busesGrid">
+                <!-- Автобусы загружаются через JavaScript -->
+            </div>
+        </div>
+    </section>
+
+    <script>
+        async function loadBuses() {
+            try {
+                const response = await fetch('/api/buses');
+                const buses = await response.json();
+                renderBuses(buses);
+            } catch (error) {
+                console.error('Ошибка загрузки автобусов:', error);
+                document.getElementById('busesGrid').innerHTML = 
+                    '<p class="error-message">Ошибка загрузки данных. Пожалуйста, обновите страницу.</p>';
+            }
+        }
+
+        function renderBuses(buses) {
+            const grid = document.getElementById('busesGrid');
+            grid.innerHTML = '';
+            
+            buses.forEach(bus => {
+                const busCard = `
+                    <div class="bus-card">
+                        <div class="bus-image">
+                            ${getBusEmoji(bus.type)}
+                        </div>
+                        <div class="bus-info">
+                            <span class="availability ${bus.availability}">
+                                ${bus.availability === 'available' ? 'Свободен' : 'Занят'}
+                            </span>
+                            <h3 class="bus-title">${bus.name}</h3>
+                            <div class="bus-specs">
+                                <div class="spec-item">
+                                    <i class="fas fa-users"></i>
+                                    <span>${bus.seats} мест</span>
+                                </div>
+                                <div class="spec-item">
+                                    <i class="fas fa-calendar"></i>
+                                    <span>${bus.year} год</span>
+                                </div>
+                                <div class="spec-item">
+                                    <i class="fas fa-snowflake"></i>
+                                    <span>${bus.has_ac ? 'Кондиционер' : 'Без кондиционера'}</span>
+                                </div>
+                                <div class="spec-item">
+                                    <i class="fas fa-wifi"></i>
+                                    <span>${bus.has_wifi ? 'Wi-Fi' : 'Без Wi-Fi'}</span>
+                                </div>
+                            </div>
+                            <div class="driver-info">
+                                <div class="driver-name">Водитель: ${bus.driver_name}</div>
+                                <div class="driver-exp">Опыт: ${bus.experience}, Рейтинг: ${bus.rating}/5</div>
+                            </div>
+                            <div class="bus-price">${bus.price_per_hour} ₽/час</div>
+                            <button class="select-bus-btn" onclick="selectBus(${bus.id})" 
+                                    ${bus.availability !== 'available' ? 'disabled' : ''}>
+                                ${bus.availability === 'available' ? 'Выбрать' : 'Недоступен'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+                grid.innerHTML += busCard;
+            });
+        }
+
+        function getBusEmoji(type) {
+            return type === 'Автобус' ? '🚍' : '🚐';
+        }
+
+        function selectBus(busId) {
+            // Находим выбранный автобус
+            fetch('/api/buses')
+                .then(response => response.json())
+                .then(buses => {
+                    const selectedBus = buses.find(bus => bus.id === busId);
+                    if (selectedBus) {
+                        // Сохраняем в localStorage и переходим к заказу
+                        localStorage.setItem('selectedBus', JSON.stringify(selectedBus));
+                        window.location.href = 'index.html#order';
+                    }
+                })
+                .catch(error => {
+                    console.error('Ошибка выбора автобуса:', error);
+                    alert('Ошибка при выборе автобуса');
+                });
+        }
+
+        document.addEventListener('DOMContentLoaded', loadBuses);
+    </script>
+</body>
+</html>
