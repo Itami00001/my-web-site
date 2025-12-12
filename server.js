@@ -1,6 +1,6 @@
 require('dotenv').config();
 
-console.log('Проверка токена из .env:', process.env.BOT_TOKEN);
+console.log('🔥 HOT RELOAD РАБОТАЕТ!');
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -8,6 +8,10 @@ const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const rateLimiter = require('./middleware');
 const { Pool } = require('pg');
+const Docker = require('dockerode');
+
+// Docker connection - используем Unix socket для Linux контейнеров
+const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -21,7 +25,7 @@ const pool = new Pool({
     user: process.env.DB_USER || 'postgres',
     host: process.env.DB_HOST || 'localhost',
     database: process.env.DB_NAME || 'pickadrive',
-    password: process.env.DB_PASSWORD || 'your_password',
+    password: process.env.DB_PASSWORD || '1',
     port: process.env.DB_PORT || 5432,
 });
 
@@ -127,6 +131,168 @@ app.get('/bus-selection', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'bus-selection.html'));
 });
 
+// IP-based middleware для Docker monitoring
+function dockerMonitoringAuth(req, res, next) {
+    // Для разработки разрешаем доступ с localhost и Docker network
+    const clientIp = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+
+    console.log('🔍 Docker Monitor Access from IP:', clientIp);
+
+    // Разрешаем доступ для локальных запросов и Docker сети
+    const allowedPatterns = [
+        '127.0.0.1',
+        '::1',
+        '::ffff:127.0.0.1',
+        'localhost',
+        '172.', // Docker network range
+        '192.168.', // Local network
+    ];
+
+    const isAllowed = allowedPatterns.some(pattern =>
+        clientIp && clientIp.toString().includes(pattern)
+    );
+
+    if (isAllowed) {
+        return next();
+    }
+
+    console.log('❌ Access denied for IP:', clientIp);
+    res.status(403).json({ error: 'Access denied - Docker monitoring is restricted' });
+}
+
+// Docker Monitoring Dashboard Page
+app.get('/docker-monitor', dockerMonitoringAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'docker-monitor.html'));
+});
+
+// API: Get all containers
+app.get('/api/docker/containers', dockerMonitoringAuth, async (req, res) => {
+    try {
+        const containers = await docker.listContainers({ all: true });
+        const detailedContainers = await Promise.all(
+            containers.map(async (container) => {
+                const containerObj = docker.getContainer(container.Id);
+                const stats = await containerObj.stats({ stream: false });
+                const inspect = await containerObj.inspect();
+
+                return {
+                    id: container.Id.substring(0, 12),
+                    name: container.Names[0].replace('/', ''),
+                    image: container.Image,
+                    state: container.State,
+                    status: container.Status,
+                    created: container.Created,
+                    stats: {
+                        cpu: calculateCPUPercent(stats),
+                        memory: calculateMemoryUsage(stats),
+                        network: calculateNetworkIO(stats)
+                    },
+                    ports: container.Ports
+                };
+            })
+        );
+
+        res.json(detailedContainers);
+    } catch (error) {
+        console.error('Docker API Error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Get container logs
+app.get('/api/docker/logs/:id', dockerMonitoringAuth, async (req, res) => {
+    try {
+        const container = docker.getContainer(req.params.id);
+        const logs = await container.logs({
+            stdout: true,
+            stderr: true,
+            tail: 100,
+            timestamps: true
+        });
+
+        res.json({ logs: logs.toString('utf8') });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: Restart container
+app.post('/api/docker/restart/:id', dockerMonitoringAuth, async (req, res) => {
+    try {
+        const container = docker.getContainer(req.params.id);
+        await container.restart();
+        res.json({ message: 'Container restarted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// API: System info
+app.get('/api/docker/info', dockerMonitoringAuth, async (req, res) => {
+    try {
+        const info = await docker.info();
+        const version = await docker.version();
+
+        res.json({
+            containers: info.Containers,
+            containersRunning: info.ContainersRunning,
+            containersPaused: info.ContainersPaused,
+            containersStopped: info.ContainersStopped,
+            images: info.Images,
+            serverVersion: version.Version,
+            memTotal: (info.MemTotal / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+            cpus: info.NCPU
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Helper functions for stats calculation
+function calculateCPUPercent(stats) {
+    if (!stats || !stats.cpu_stats || !stats.precpu_stats) return 0;
+
+    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+    const cpuCount = stats.cpu_stats.online_cpus || 1;
+
+    if (systemDelta > 0 && cpuDelta > 0) {
+        return ((cpuDelta / systemDelta) * cpuCount * 100).toFixed(2);
+    }
+    return 0;
+}
+
+function calculateMemoryUsage(stats) {
+    if (!stats || !stats.memory_stats) return { used: 0, limit: 0, percent: 0 };
+
+    const used = stats.memory_stats.usage || 0;
+    const limit = stats.memory_stats.limit || 0;
+    const percent = limit > 0 ? ((used / limit) * 100).toFixed(2) : 0;
+
+    return {
+        used: (used / 1024 / 1024).toFixed(2) + ' MB',
+        limit: (limit / 1024 / 1024).toFixed(2) + ' MB',
+        percent: percent
+    };
+}
+
+function calculateNetworkIO(stats) {
+    if (!stats || !stats.networks) return { rx: '0 KB', tx: '0 KB' };
+
+    let rxBytes = 0;
+    let txBytes = 0;
+
+    Object.values(stats.networks).forEach(network => {
+        rxBytes += network.rx_bytes || 0;
+        txBytes += network.tx_bytes || 0;
+    });
+
+    return {
+        rx: (rxBytes / 1024).toFixed(2) + ' KB',
+        tx: (txBytes / 1024).toFixed(2) + ' KB'
+    };
+}
+
 // API для получения списка автобусов
 app.get('/api/buses', async (req, res) => {
     try {
@@ -153,11 +319,11 @@ app.get('/api/buses/:id', async (req, res) => {
             LEFT JOIN drivers d ON b.id = d.bus_id
             WHERE b.id = $1
         `, [req.params.id]);
-        
+
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Автобус не найден' });
         }
-        
+
         res.json(result.rows[0]);
     } catch (error) {
         console.error('❌ Ошибка получения автобуса:', error);
@@ -181,12 +347,12 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
             `INSERT INTO orders (customer_name, customer_phone, from_location, to_location, trip_date, passengers_count, special_requests, bus_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
             [
-                orderData.name, 
-                orderData.phone, 
-                orderData.from, 
-                orderData.to, 
-                orderData.dateTime, 
-                orderData.passengers, 
+                orderData.name,
+                orderData.phone,
+                orderData.from,
+                orderData.to,
+                orderData.dateTime,
+                orderData.passengers,
                 orderData.request,
                 orderData.busId || null
             ]
@@ -202,7 +368,7 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
         message += `🎯 Куда: ${orderData.to}\n`;
         message += `📅 Дата: ${orderData.dateTime}\n`;
         message += `👥 Пассажиры: ${orderData.passengers}\n`;
-        
+
         // Если выбран автобус
         if (orderData.busId) {
             const busResult = await pool.query(
@@ -214,18 +380,18 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
                 message += `🚌 Автобус: ${bus.name} (${bus.seats} мест)\n`;
             }
         }
-        
+
         message += ` Пожелания: ${orderData.request || 'нет'}\n`;
         message += `\n Время заказа: ${new Date().toLocaleString('ru-RU')}`;
 
         // Отправляем в Telegram
         await bot.sendMessage(CHAT_IT, message);
         await bot.sendMessage(CHAT_ID, message);
-        
+
         console.log('✅ Сообщение успешно отправлено в Telegram');
-        res.json({ 
+        res.json({
             message: 'Заказ успешно отправлен! Мы свяжемся с вами в ближайшее время.',
-            orderId: orderId 
+            orderId: orderId
         });
 
     } catch (error) {
@@ -238,13 +404,13 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
 app.post('/api/admin/buses', async (req, res) => {
     try {
         const { name, type, seats, year, has_ac, has_wifi, price_per_hour, image_url } = req.body;
-        
+
         const result = await pool.query(
             `INSERT INTO buses (name, type, seats, year, has_ac, has_wifi, price_per_hour, image_url)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
             [name, type, seats, year, has_ac, has_wifi, price_per_hour, image_url]
         );
-        
+
         res.json({ message: 'Автобус добавлен', bus: result.rows[0] });
     } catch (error) {
         console.error('❌ Ошибка добавления автобуса:', error);

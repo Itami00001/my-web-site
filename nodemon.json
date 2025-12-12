@@ -1,0 +1,15 @@
+{
+    "watch": [
+        "server.js",
+        "middleware.js",
+        "public/**/*.js"
+    ],
+    "ignore": [
+        "rateLimitData.json",
+        "node_modules",
+        "*.log",
+        ".git"
+    ],
+    "ext": "js,json",
+    "delay": "1000"
+}

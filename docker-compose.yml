@@ -5,9 +5,15 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
-    # НЕТ volumes - значит нет авто-перезагрузки
-    command: npm start
+      - NODE_ENV=development
+    volumes:
+      # Монтируем исходный код для hot reload
+      - ./:/app
+      # Исключаем node_modules (используем из контейнера)
+      - /app/node_modules
+      # Монтируем Docker socket для доступа к Docker API
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: npm run dev
 
 # Автоматические бэкапы базы данных (docker-compose run --rm db-backup)
   db-backup:
