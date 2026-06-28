@@ -4,8 +4,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initSmoothScroll();
     initNavbarEffects();
     initFloatingIcons();
-    
-    // Проверяем, был ли выбран автобус
+    initYandexMaps();
+    loadBuses();
+    initPriceCalculation();
+    initRouteItems();
+    initMapModal();
+
     const selectedBus = localStorage.getItem('selectedBus');
     if (selectedBus) {
         const bus = JSON.parse(selectedBus);
@@ -18,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         localStorage.removeItem('selectedBus');
     }
+    updateSelectRouteButtonVisibility();
 });
 
 function initOrderForm() {
@@ -26,6 +31,11 @@ function initOrderForm() {
 
     orderForm.addEventListener('submit', async (event) => {
         event.preventDefault();
+
+        const fromValue = document.getElementById('from').value.trim();
+        const toValue = document.getElementById('to').value.trim();
+        document.getElementById('formFrom').value = fromValue;
+        document.getElementById('formTo').value = toValue;
 
         if (!validateForm(orderForm)) return;
 
@@ -38,17 +48,19 @@ function initOrderForm() {
             const formData = {
                 name: orderForm.name.value.trim(),
                 phone: orderForm.phone.value.trim(),
-                from: orderForm.from.value.trim(),
-                to: orderForm.to.value.trim(),
-                dateTime: orderForm.dateTime.value.trim(),
+                from: fromValue,
+                to: toValue,
+                distance: document.getElementById('calculatedDistance').textContent.trim(),
+                date: orderForm.date.value.trim(),
+                time: orderForm.time.value.trim(),
                 passengers: orderForm.passengers.value,
                 request: orderForm.request.value.trim(),
-                busId: orderForm.busId ? orderForm.busId.value : null
+                busId: document.getElementById('busSelect').value || null
             };
 
             const response = await fetch('/api/orders', {
                 method: 'POST',
-                headers: { 
+                headers: {
                     'Content-Type': 'application/json',
                     'X-Requested-With': 'XMLHttpRequest'
                 },
@@ -61,10 +73,13 @@ function initOrderForm() {
                 showNotification(data.message, 'success');
                 orderForm.reset();
                 document.getElementById('selectedBusInfo').innerHTML = '';
+                document.getElementById('from').value = '';
+                document.getElementById('to').value = '';
+                updateSelectRouteButtonVisibility();
+                updateShowOnMapButton();
             } else {
                 throw new Error(data.error || 'Ошибка сервера');
             }
-
         } catch (error) {
             console.error('Ошибка:', error);
             showNotification(error.message, 'error');
@@ -79,9 +94,8 @@ function validateForm(form) {
     const fields = [
         { name: 'name', maxLength: 100 },
         { name: 'phone', maxLength: 20 },
-        { name: 'from', maxLength: 100 },
-        { name: 'to', maxLength: 100 },
-        { name: 'dateTime', maxLength: 50 },
+        { name: 'date', maxLength: 20 },
+        { name: 'time', maxLength: 10 },
         { name: 'passengers', maxLength: 3 },
         { name: 'request', maxLength: 300 }
     ];
@@ -89,14 +103,38 @@ function validateForm(form) {
     for (const field of fields) {
         const input = form[field.name];
         if (input && input.value.length > field.maxLength) {
-            showNotification(`Слишком длинное значение в поле`, 'error');
+            showNotification('Слишком длинное значение в поле', 'error');
             input.focus();
             return false;
         }
     }
 
-    if (!form.name.value.trim() || !form.phone.value.trim() || 
-        !form.from.value.trim() || !form.to.value.trim()) {
+    const phone = form.phone.value.trim();
+    const phonePattern = /^[0-9+\-\s]+$/;
+    if (!phonePattern.test(phone)) {
+        showNotification('Телефон должен содержать только цифры, +, - и пробел', 'error');
+        form.phone.focus();
+        return false;
+    }
+
+    const from = form.from.value.trim();
+    const to = form.to.value.trim();
+
+    if (from.length > 100) {
+        showNotification('Слишком длинное значение в поле "Откуда"', 'error');
+        document.getElementById('from').focus();
+        return false;
+    }
+
+    if (to.length > 100) {
+        showNotification('Слишком длинное значение в поле "Куда"', 'error');
+        document.getElementById('to').focus();
+        return false;
+    }
+
+    if (!form.name.value.trim() || !form.phone.value.trim() ||
+        !from || !to ||
+        !form.date.value.trim() || !form.time.value.trim()) {
         showNotification('Заполните все обязательные поля', 'error');
         return false;
     }
@@ -116,7 +154,6 @@ function showNotification(message, type = 'info') {
     `;
 
     document.body.appendChild(notification);
-
     setTimeout(() => notification.classList.add('show'), 100);
 
     const autoClose = setTimeout(() => {
@@ -185,4 +222,465 @@ function initFloatingIcons() {
             setTimeout(() => floatingIcons.style.transform = 'scale(1)', 300);
         }, 2000);
     }
+}
+
+let map, route, fromPoint, toPoint;
+let modalMap, modalRoute, modalFromPoint, modalToPoint;
+let modalMapInitialized = false;
+
+function geocodeAddress(coords) {
+    return ymaps.geocode(coords).then((res) => {
+        const firstGeoObject = res.geoObjects.get(0);
+        if (!firstGeoObject) {
+            throw new Error('Адрес не найден');
+        }
+        return firstGeoObject.getAddressLine();
+    });
+}
+
+function handleGeocodeError(error) {
+    console.error('Ошибка геокодинга:', error);
+    showNotification('Не удалось определить адрес, попробуйте вручную', 'error');
+}
+
+function updateShowOnMapButton() {
+    const btn = document.getElementById('showOnMapBtn');
+    if (!btn) return;
+    const from = document.getElementById('from').value.trim();
+    const to = document.getElementById('to').value.trim();
+    btn.style.display = (from && to) ? 'block' : 'none';
+}
+
+function updateSelectRouteButtonVisibility() {
+    const btn = document.getElementById('selectRouteBtn');
+    const selectedBusInfo = document.getElementById('selectedBusInfo');
+    if (!btn) return;
+    const hasBus = selectedBusInfo && selectedBusInfo.innerHTML.trim().length > 0;
+    btn.style.display = hasBus ? 'block' : 'none';
+}
+
+function addMarkerToMap(targetMap, coords, label) {
+    const placemark = new ymaps.Placemark(coords, {
+        iconContent: label
+    }, {
+        preset: 'islands#blackStretchyIcon'
+    });
+    targetMap.geoObjects.add(placemark);
+}
+
+function addMarker(coords, label) {
+    addMarkerToMap(map, coords, label);
+}
+
+function clearMapState(targetMap, state) {
+    if (state.route) {
+        targetMap.geoObjects.remove(state.route);
+        state.route = null;
+    }
+    targetMap.geoObjects.removeAll();
+    state.fromPoint = null;
+    state.toPoint = null;
+}
+
+function clearRoute() {
+    if (!map) return;
+    clearMapState(map, { route, fromPoint, toPoint });
+    route = null;
+    fromPoint = null;
+    toPoint = null;
+}
+
+function handleMapClick(coords, state, targetMap, fromInput, toInput, options = {}) {
+    const { onBothPointsSet, onReset } = options;
+
+    if (!state.fromPoint) {
+        state.fromPoint = coords;
+        geocodeAddress(coords)
+            .then((address) => {
+                fromInput.value = address;
+                addMarkerToMap(targetMap, coords, 'A');
+            })
+            .catch((error) => {
+                handleGeocodeError(error);
+                addMarkerToMap(targetMap, coords, 'A');
+            });
+    } else if (!state.toPoint) {
+        state.toPoint = coords;
+        geocodeAddress(coords)
+            .then((address) => {
+                toInput.value = address;
+                addMarkerToMap(targetMap, coords, 'B');
+                if (onBothPointsSet) onBothPointsSet();
+            })
+            .catch((error) => {
+                handleGeocodeError(error);
+                addMarkerToMap(targetMap, coords, 'B');
+                if (onBothPointsSet) onBothPointsSet();
+            });
+    } else {
+        clearMapState(targetMap, state);
+        state.fromPoint = coords;
+        state.toPoint = null;
+        state.route = null;
+        if (onReset) onReset();
+        geocodeAddress(coords)
+            .then((address) => {
+                fromInput.value = address;
+                toInput.value = '';
+                addMarkerToMap(targetMap, coords, 'A');
+            })
+            .catch((error) => {
+                handleGeocodeError(error);
+                fromInput.value = '';
+                toInput.value = '';
+                addMarkerToMap(targetMap, coords, 'A');
+            });
+    }
+}
+
+function initYandexMaps() {
+    if (typeof ymaps === 'undefined') {
+        console.log('Яндекс Карты загружаются...');
+        setTimeout(initYandexMaps, 1000);
+        return;
+    }
+
+    ymaps.ready(() => {
+        map = new ymaps.Map('map', {
+            center: [44.9521, 34.1024],
+            zoom: 9,
+            controls: ['zoomControl', 'searchControl']
+        });
+
+        const fromInput = document.getElementById('from');
+        const toInput = document.getElementById('to');
+        const mapState = {
+            get fromPoint() { return fromPoint; },
+            set fromPoint(value) { fromPoint = value; },
+            get toPoint() { return toPoint; },
+            set toPoint(value) { toPoint = value; },
+            get route() { return route; },
+            set route(value) { route = value; }
+        };
+
+        map.events.add('click', (e) => {
+            handleMapClick(
+                e.get('coords'),
+                mapState,
+                map,
+                fromInput,
+                toInput,
+                {
+                    onBothPointsSet: () => {
+                        document.getElementById('calculatePriceBtn').style.display = 'block';
+                        updateShowOnMapButton();
+                    },
+                    onReset: () => {
+                        document.getElementById('calculatePriceBtn').style.display = 'none';
+                        document.getElementById('busSelectionGroup').style.display = 'none';
+                        document.getElementById('priceCalculation').style.display = 'none';
+                        updateShowOnMapButton();
+                    }
+                }
+            );
+        });
+
+        fromInput.addEventListener('input', updateShowOnMapButton);
+        toInput.addEventListener('input', updateShowOnMapButton);
+
+        document.getElementById('calculatePriceBtn').addEventListener('click', () => {
+            calculateRoute();
+            document.getElementById('busSelectionGroup').style.display = 'block';
+            document.getElementById('priceCalculation').style.display = 'block';
+            document.getElementById('calculatePriceBtn').style.display = 'none';
+            updateShowOnMapButton();
+        });
+    });
+}
+
+function calculateRoute() {
+    if (!fromPoint || !toPoint) return;
+
+    ymaps.route([fromPoint, toPoint], {
+        mapStateAutoApply: true,
+        avoidTrafficJams: false
+    }).then((res) => {
+        route = res;
+        map.geoObjects.add(route);
+
+        const distance = res.getLength() / 1000;
+        document.getElementById('calculatedDistance').textContent = distance.toFixed(1);
+        updatePrice(distance);
+    }).catch((err) => {
+        console.error('Ошибка построения маршрута:', err);
+        showNotification('Не удалось построить маршрут. Попробуйте выбрать другие точки.', 'error');
+    });
+}
+
+async function loadBuses() {
+    try {
+        const response = await fetch('/api/buses');
+        const buses = await response.json();
+        const busSelect = document.getElementById('busSelect');
+
+        buses.forEach(bus => {
+            const option = document.createElement('option');
+            option.value = bus.id;
+            option.textContent = `${bus.name} (${bus.seats} мест) - ${bus.price_per_km} ₽/км`;
+            option.dataset.price = bus.price_per_km;
+            busSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Ошибка загрузки автобусов:', error);
+    }
+}
+
+function initPriceCalculation() {
+    const busSelect = document.getElementById('busSelect');
+    busSelect.addEventListener('change', () => updatePrice());
+
+    const showOnMapBtn = document.getElementById('showOnMapBtn');
+    if (showOnMapBtn) {
+        showOnMapBtn.addEventListener('click', () => {
+            const from = document.getElementById('from').value.trim();
+            const to = document.getElementById('to').value.trim();
+
+            if (from && to) {
+                const url = `https://yandex.ru/maps/?rtext=~${encodeURIComponent(from)}~${encodeURIComponent(to)}&rtt=auto`;
+                window.open(url, '_blank');
+            } else {
+                showNotification('Заполните поля "Откуда" и "Куда"', 'error');
+            }
+        });
+    }
+}
+
+function updatePrice(distance = null) {
+    const calculatedDistance = distance || parseFloat(document.getElementById('calculatedDistance').textContent) || 0;
+    const busSelect = document.getElementById('busSelect');
+    const selectedOption = busSelect.options[busSelect.selectedIndex];
+
+    if (selectedOption && selectedOption.dataset.price) {
+        const pricePerKm = parseFloat(selectedOption.dataset.price);
+        const totalPrice = calculatedDistance * pricePerKm;
+        document.getElementById('estimatedPrice').textContent = totalPrice.toFixed(0);
+    }
+}
+
+function initRouteItems() {
+    const routeItems = document.querySelectorAll('.route-item');
+    routeItems.forEach(item => {
+        item.addEventListener('click', async () => {
+            const from = item.dataset.from;
+            const to = item.dataset.to;
+
+            if (from && to) {
+                document.getElementById('from').value = from;
+                document.getElementById('to').value = to;
+                clearRoute();
+                updateShowOnMapButton();
+
+                if (typeof ymaps === 'undefined') return;
+
+                try {
+                    const fromResult = await ymaps.geocode(from);
+                    const toResult = await ymaps.geocode(to);
+
+                    const fromGeo = fromResult.geoObjects.get(0);
+                    const toGeo = toResult.geoObjects.get(0);
+                    if (!fromGeo || !toGeo) {
+                        throw new Error('Адрес не найден');
+                    }
+
+                    fromPoint = fromGeo.geometry.getCoordinates();
+                    toPoint = toGeo.geometry.getCoordinates();
+
+                    addMarker(fromPoint, 'A');
+                    addMarker(toPoint, 'B');
+
+                    calculateRoute();
+                    document.getElementById('busSelectionGroup').style.display = 'block';
+                    document.getElementById('priceCalculation').style.display = 'block';
+                } catch (error) {
+                    handleGeocodeError(error);
+                }
+            } else {
+                clearRoute();
+                document.getElementById('from').value = '';
+                document.getElementById('to').value = '';
+                document.getElementById('busSelectionGroup').style.display = 'none';
+                document.getElementById('priceCalculation').style.display = 'none';
+                document.getElementById('calculatePriceBtn').style.display = 'none';
+                updateShowOnMapButton();
+            }
+        });
+    });
+}
+
+function initModalMap() {
+    if (modalMapInitialized || typeof ymaps === 'undefined') return;
+
+    modalMap = new ymaps.Map('modalMap', {
+        center: [44.9521, 34.1024],
+        zoom: 9,
+        controls: ['zoomControl', 'searchControl']
+    });
+
+    const fromInput = document.getElementById('modalFrom');
+    const toInput = document.getElementById('modalTo');
+    const modalState = {
+        get fromPoint() { return modalFromPoint; },
+        set fromPoint(value) { modalFromPoint = value; },
+        get toPoint() { return modalToPoint; },
+        set toPoint(value) { modalToPoint = value; },
+        get route() { return modalRoute; },
+        set route(value) { modalRoute = value; }
+    };
+
+    modalMap.events.add('click', (e) => {
+        handleMapClick(
+            e.get('coords'),
+            modalState,
+            modalMap,
+            fromInput,
+            toInput,
+            {
+                onBothPointsSet: () => {
+                    document.getElementById('modalCalculateBtn').style.display = 'block';
+                    document.getElementById('modalApplyBtn').style.display = 'block';
+                },
+                onReset: () => {
+                    document.getElementById('modalCalculateBtn').style.display = 'none';
+                    document.getElementById('modalPriceCalculation').style.display = 'none';
+                    document.getElementById('modalApplyBtn').style.display = 'none';
+                }
+            }
+        );
+    });
+
+    modalMapInitialized = true;
+}
+
+function calculateModalRoute() {
+    if (!modalFromPoint || !modalToPoint) return;
+
+    ymaps.route([modalFromPoint, modalToPoint], {
+        mapStateAutoApply: true,
+        avoidTrafficJams: false
+    }).then((res) => {
+        if (modalRoute) {
+            modalMap.geoObjects.remove(modalRoute);
+        }
+        modalRoute = res;
+        modalMap.geoObjects.add(modalRoute);
+
+        const distance = res.getLength() / 1000;
+        document.getElementById('modalCalculatedDistance').textContent = distance.toFixed(1);
+        document.getElementById('modalPriceCalculation').style.display = 'block';
+        document.getElementById('modalApplyBtn').style.display = 'block';
+    }).catch((err) => {
+        console.error('Ошибка построения маршрута:', err);
+        showNotification('Не удалось построить маршрут. Попробуйте выбрать другие точки.', 'error');
+    });
+}
+
+function resetModalMap() {
+    if (modalMap) {
+        clearMapState(modalMap, { route: modalRoute, fromPoint: modalFromPoint, toPoint: modalToPoint });
+    }
+    modalRoute = null;
+    modalFromPoint = null;
+    modalToPoint = null;
+
+    document.getElementById('modalFrom').value = '';
+    document.getElementById('modalTo').value = '';
+    document.getElementById('modalCalculateBtn').style.display = 'none';
+    document.getElementById('modalPriceCalculation').style.display = 'none';
+    document.getElementById('modalApplyBtn').style.display = 'none';
+    document.getElementById('modalCalculatedDistance').textContent = '0';
+}
+
+function syncMainMapFromFields(from, to) {
+    document.getElementById('from').value = from;
+    document.getElementById('to').value = to;
+    document.getElementById('formFrom').value = from;
+    document.getElementById('formTo').value = to;
+    updateShowOnMapButton();
+
+    if (typeof ymaps === 'undefined' || !map) return;
+
+    clearRoute();
+    Promise.all([ymaps.geocode(from), ymaps.geocode(to)])
+        .then(([fromResult, toResult) => {
+            const fromGeo = fromResult.geoObjects.get(0);
+            const toGeo = toResult.geoObjects.get(0);
+            if (!fromGeo || !toGeo) {
+                throw new Error('Адрес не найден');
+            }
+
+            fromPoint = fromGeo.geometry.getCoordinates();
+            toPoint = toGeo.geometry.getCoordinates();
+            addMarker(fromPoint, 'A');
+            addMarker(toPoint, 'B');
+            calculateRoute();
+            document.getElementById('busSelectionGroup').style.display = 'block';
+            document.getElementById('priceCalculation').style.display = 'block';
+        })
+        .catch((error) => {
+            handleGeocodeError(error);
+        });
+}
+
+function initMapModal() {
+    const selectRouteBtn = document.getElementById('selectRouteBtn');
+    const mapModal = document.getElementById('mapModal');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    const modalCancelBtn = document.getElementById('modalCancelBtn');
+    const modalApplyBtn = document.getElementById('modalApplyBtn');
+    const modalCalculateBtn = document.getElementById('modalCalculateBtn');
+
+    if (!selectRouteBtn || !mapModal) return;
+
+    selectRouteBtn.style.display = 'none';
+
+    const closeModal = () => {
+        mapModal.style.display = 'none';
+        document.body.style.overflow = '';
+    };
+
+    selectRouteBtn.addEventListener('click', () => {
+        resetModalMap();
+        mapModal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+
+        if (typeof ymaps !== 'undefined') {
+            ymaps.ready(() => {
+                initModalMap();
+                if (modalMap) {
+                    modalMap.container.fitToViewport();
+                }
+            });
+        }
+    });
+
+    closeModalBtn.addEventListener('click', closeModal);
+    if (modalCancelBtn) modalCancelBtn.addEventListener('click', closeModal);
+    mapModal.addEventListener('click', (e) => {
+        if (e.target === mapModal) closeModal();
+    });
+
+    modalCalculateBtn.addEventListener('click', calculateModalRoute);
+
+    modalApplyBtn.addEventListener('click', () => {
+        const from = document.getElementById('modalFrom').value.trim();
+        const to = document.getElementById('modalTo').value.trim();
+
+        if (!from || !to) {
+            showNotification('Выберите обе точки маршрута', 'error');
+            return;
+        }
+
+        syncMainMapFromFields(from, to);
+        closeModal();
+    });
 }

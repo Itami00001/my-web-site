@@ -5,10 +5,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pick a Drive - Надёжный трансфер по Крыму и Москве</title>
-    <link rel="icon" type="image/png" href="piadlogopng.png">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=956aaecb-f6bf-4905-9026-c77a0cbbdea2&lang=ru_RU&load=package.full"></script>
 </head>
 
 <body>
@@ -145,35 +146,35 @@
                 <div class="routes-sidebar">
                     <h3>Часто выбираемые направления</h3>
                     <div class="route-list">
-                        <div class="route-item" data-route="simferopol-yalta">
+                        <div class="route-item" data-route="simferopol-yalta" data-from="Симферополь" data-to="Ялта">
                             <div class="route-info">
                                 <i class="fas fa-map-marker-alt"></i>
                                 <span>Симферополь → Ялта</span>
                             </div>
                             <span class="route-price">от 3500₽</span>
                         </div>
-                        <div class="route-item" data-route="sevastopol-feodosia">
+                        <div class="route-item" data-route="sevastopol-feodosia" data-from="Севастополь" data-to="Феодосия">
                             <div class="route-info">
                                 <i class="fas fa-map-marker-alt"></i>
                                 <span>Севастополь → Феодосия</span>
                             </div>
                             <span class="route-price">от 5000₽</span>
                         </div>
-                        <div class="route-item" data-route="kerch-sudak">
+                        <div class="route-item" data-route="kerch-sudak" data-from="Керчь" data-to="Судак">
                             <div class="route-info">
                                 <i class="fas fa-map-marker-alt"></i>
                                 <span>Керчь → Судак</span>
                             </div>
                             <span class="route-price">от 4200₽</span>
                         </div>
-                        <div class="route-item" data-route="moscow-airport">
+                        <div class="route-item" data-route="moscow-airport" data-from="Москва" data-to="Домодедово">
                             <div class="route-info">
                                 <i class="fas fa-plane"></i>
                                 <span>Москва → Домодедово</span>
                             </div>
                             <span class="route-price">от 2500₽</span>
                         </div>
-                        <div class="route-item" data-route="custom">
+                        <div class="route-item" data-route="custom" data-from="" data-to="">
                             <div class="route-info">
                                 <i class="fas fa-pencil-alt"></i>
                                 <span>Свой маршрут</span>
@@ -183,13 +184,28 @@
                     </div>
                 </div>
                 <div class="map-display">
-                    <div id="interactive-map">
-                        <img src="https://via.placeholder.com/800x500/667eea/ffffff?text=Интерактивная+карта+маршрутов"
-                            alt="Карта маршрутов">
-                        <div class="map-overlay">
-                            <i class="fas fa-map-marked-alt"></i>
-                            <p>Нажмите на маршрут слева для отображения на карте</p>
+                    <div id="map" style="width: 100%; height: 400px;"></div>
+                    <div class="route-info">
+                        <div class="form-group">
+                            <label for="from">Откуда (Пункт А):</label>
+                            <input type="text" name="from" id="from" placeholder="Введите адрес или выберите на карте" required>
                         </div>
+                        <div class="form-group">
+                            <label for="to">Куда (Пункт Б):</label>
+                            <input type="text" name="to" id="to" placeholder="Введите адрес или выберите на карте" required>
+                        </div>
+                        <button type="button" id="calculatePriceBtn" class="submit-btn" style="display: none;">Рассчитать стоимость</button>
+                        <div class="form-group" id="busSelectionGroup" style="display: none;">
+                            <label for="busSelect">Выберите автобус:</label>
+                            <select name="busSelect" id="busSelect">
+                                <option value="">-- Выберите автобус --</option>
+                            </select>
+                        </div>
+                        <div class="price-calculation" id="priceCalculation" style="display: none;">
+                            <p>Расстояние: <span id="calculatedDistance">0</span> км</p>
+                            <p>Примерная стоимость: <span id="estimatedPrice">0</span> ₽</p>
+                        </div>
+                        <button type="button" id="showOnMapBtn" class="submit-btn" style="display: none;">Показать на карте</button>
                     </div>
                 </div>
             </div>
@@ -318,16 +334,15 @@
                     <input type="text" name="name" id="name" placeholder="Ваше имя" required>
                 </div>
                 <div class="form-group">
-                    <input type="tel" name="phone" id="phone" placeholder="Ваш телефон" required>
+                    <input type="tel" name="phone" id="phone" placeholder="Ваш телефон" required pattern="^[0-9+\-\s]+$">
                 </div>
                 <div class="form-group">
-                    <input type="text" name="from" id="from" placeholder="Откуда" required>
+                    <label for="date">Дата:</label>
+                    <input type="date" name="date" id="date" required>
                 </div>
                 <div class="form-group">
-                    <input type="text" name="to" id="to" placeholder="Куда" required>
-                </div>
-                <div class="form-group">
-                    <input type="text" name="dateTime" id="dateTime" placeholder="Дата и время" required>
+                    <label for="time">Время:</label>
+                    <input type="time" name="time" id="time" required>
                 </div>
                 <div class="form-group">
                     <input type="number" name="passengers" id="passengers" placeholder="Количество пассажиров" required
@@ -336,8 +351,43 @@
                 <div class="form-group">
                     <textarea name="request" id="request" placeholder="Дополнительные пожелания" rows="4"></textarea>
                 </div>
+                <!-- Скрытые поля для from и to -->
+                <input type="hidden" name="from" id="formFrom">
+                <input type="hidden" name="to" id="formTo">
+                <button type="button" id="selectRouteBtn" class="submit-btn" style="display: none; margin-bottom: 10px;">Выбрать маршрут</button>
                 <button type="submit" class="submit-btn">Отправить заявку</button>
             </form>
+
+            <!-- Модальное окно с картой -->
+            <div id="mapModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Выберите маршрут на карте</h3>
+                        <button class="modal-close" id="closeModalBtn">&times;</button>
+                    </div>
+                    <div class="modal-body map-container modal-map-container">
+                        <div class="map-display">
+                            <div id="modalMap" style="width: 100%; height: 400px;"></div>
+                            <div class="route-info">
+                                <div class="form-group">
+                                    <label for="modalFrom">Откуда (Пункт А):</label>
+                                    <input type="text" id="modalFrom" placeholder="Введите адрес или выберите на карте">
+                                </div>
+                                <div class="form-group">
+                                    <label for="modalTo">Куда (Пункт Б):</label>
+                                    <input type="text" id="modalTo" placeholder="Введите адрес или выберите на карте">
+                                </div>
+                                <button type="button" id="modalCalculateBtn" class="submit-btn" style="display: none;">Рассчитать</button>
+                                <div class="price-calculation" id="modalPriceCalculation" style="display: none;">
+                                    <p>Расстояние: <span id="modalCalculatedDistance">0</span> км</p>
+                                </div>
+                                <button type="button" id="modalApplyBtn" class="submit-btn" style="display: none;">Применить маршрут</button>
+                                <button type="button" id="modalCancelBtn" class="submit-btn modal-cancel-btn">Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -364,7 +414,7 @@
     <footer id="contact">
         <div class="container">
             <p>Свяжитесь с нами: +7 (978) 899-37-22 | prikolporodii@gmail.com</p>
-            <p>&copy; 2025 Pick a Drive. Все права защищены.</p>
+            <p>&copy; 2026 Pick a Drive.</p>
         </div>
     </footer>
 
