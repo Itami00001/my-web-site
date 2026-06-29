@@ -1,35 +1,38 @@
 version: '3.8'
 services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=1
+      - POSTGRES_DB=pickadrive
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   web:
     build: .
     ports:
       - "3000:3000"
+    env_file:
+      - .env
     environment:
-      - NODE_ENV=development
-    volumes:
-      # Монтируем исходный код для hot reload
-      - ./:/app
-      # Исключаем node_modules (используем из контейнера)
-      - /app/node_modules
-      # Монтируем Docker socket для доступа к Docker API
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: npm run dev
+      - NODE_ENV=production
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=1
+      - DB_NAME=pickadrive
+    depends_on:
+      db:
+        condition: service_healthy
+    command: npm start
 
-# Автоматические бэкапы базы данных (docker-compose run --rm db-backup)
-  db-backup:
-    image: postgres:15
-    volumes:
-      - ./backups:/backups
-    environment:
-      - PGHOST=host.docker.internal
-      - PGDATABASE=pickadrive
-      - PGUSER=postgres
-      - PGPASSWORD=1
-    command: |
-      sh -c '
-        echo "🔄 Начинаем бэкап базы данных..."
-        pg_dump -Fc pickadrive > /backups/backup_$(date +%Y-%m-%d_%H-%M-%S).dump
-        echo "✅ Бэкап создан!"
-        exit 0
-      '
-    restart: "no"  # запускается только когда нужно
+volumes:
+  postgres_data:

@@ -1,17 +1,11 @@
 require('dotenv').config();
 
-console.log('🔥 HOT RELOAD РАБОТАЕТ!');
-
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const rateLimiter = require('./middleware');
 const { Pool } = require('pg');
-const Docker = require('dockerode');
-
-// Docker connection - используем Unix socket для Linux контейнеров
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -29,10 +23,37 @@ const pool = new Pool({
     port: process.env.DB_PORT || 5432,
 });
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// Инициализация Telegram бота (только если указан токен)
+let bot = null;
+if (BOT_TOKEN && BOT_TOKEN !== 'your_telegram_bot_token_here') {
+    try {
+        bot = new TelegramBot(BOT_TOKEN, { polling: true });
+        console.log('✅ Telegram бот инициализирован');
+    } catch (error) {
+        console.error('❌ Ошибка инициализации Telegram бота:', error.message);
+        bot = null;
+    }
+} else {
+    console.log('⚠️ Telegram бот не инициализирован - отсутствует BOT_TOKEN');
+}
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
+
+const faviconIco = Buffer.from(
+    'AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD///8A////AP///wD/////w==',
+    'base64'
+);
+
+const faviconPath = path.join(__dirname, 'public', 'favicon.ico');
+if (!require('fs').existsSync(faviconPath)) {
+    require('fs').writeFileSync(faviconPath, faviconIco);
+}
+
+app.get('/favicon.ico', (req, res) => {
+    res.type('image/x-icon').send(faviconIco);
+});
+
 app.use(express.static('public'));
 
 // Инициализация базы данных
@@ -49,6 +70,7 @@ async function initDatabase() {
                 has_ac BOOLEAN DEFAULT true,
                 has_wifi BOOLEAN DEFAULT false,
                 price_per_hour DECIMAL(10,2) NOT NULL,
+                price_per_km DECIMAL(10,2) NOT NULL,
                 image_url VARCHAR(255),
                 availability VARCHAR(20) DEFAULT 'available',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -76,7 +98,18 @@ async function initDatabase() {
                 special_requests TEXT,
                 bus_id INTEGER REFERENCES buses(id),
                 status VARCHAR(20) DEFAULT 'pending',
+                is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS rate_limits (
+                id SERIAL PRIMARY KEY,
+                ip VARCHAR(45) NOT NULL,
+                user_agent TEXT,
+                request_count INTEGER DEFAULT 1,
+                last_request TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                date DATE DEFAULT CURRENT_DATE,
+                UNIQUE(ip, user_agent, date)
             );
         `);
         console.log('✅ Таблицы БД созданы/проверены');
@@ -94,25 +127,29 @@ async function initDatabase() {
 // Добавление тестовых данных
 async function addTestData() {
     try {
-        // Добавляем автобусы
+        // Сначала очищаем старые данные
+        await pool.query('DELETE FROM drivers');
+        await pool.query('DELETE FROM buses');
+
+        // Добавляем автобусы с реальными данными
         const busResult = await pool.query(`
-            INSERT INTO buses (name, type, seats, year, has_ac, has_wifi, price_per_hour, image_url, availability) 
-            VALUES 
-            ('Mercedes-Benz Sprinter', 'Микроавтобус', 18, 2022, true, true, 2500, '🚐', 'available'),
-            ('Volkswagen Crafter', 'Микроавтобус', 16, 2021, true, false, 2200, '🚌', 'available'),
-            ('King Long', 'Автобус', 35, 2020, true, true, 4500, '🚍', 'available'),
-            ('Mercedes-Benz V-Class', 'Микроавтобус', 8, 2023, true, true, 3500, '🚐', 'available')
+            INSERT INTO buses (name, type, seats, year, has_ac, has_wifi, price_per_hour, price_per_km, image_url, availability)
+            VALUES
+            ('Mercedes Sprinter 2014 комфорт', 'Микроавтобус', 19, 2014, true, false, 2500, 80, '🚐', 'available'),
+            ('Mercedes Sprinter 2016', 'Микроавтобус', 19, 2016, true, false, 2500, 85, '🚐', 'available'),
+            ('Mercedes Sprinter 2017 дельфин', 'Микроавтобус', 19, 2017, true, false, 2700, 90, '🚐', 'available'),
+            ('Man 2000', 'Автобус', 40, 2000, true, false, 3500, 120, '�', 'available')
             RETURNING id
         `);
 
-        // Добавляем водителей
+        // Добавляем водителей с реальными данными
         await pool.query(`
-            INSERT INTO drivers (name, experience, rating, bus_id, phone) 
-            VALUES 
-            ('Иван Петров', '8 лет', 4.9, $1, '+79780000001'),
-            ('Алексей Смирнов', '6 лет', 4.8, $2, '+79780000002'),
-            ('Михаил Козлов', '10 лет', 5.0, $3, '+79780000003'),
-            ('Дмитрий Волков', '5 лет', 4.7, $4, '+79780000004')
+            INSERT INTO drivers (name, experience, rating, bus_id, phone)
+            VALUES
+            ('Александр Иванов', '12 лет', 4.8, $1, '+79780000001'),
+            ('Сергей Петров', '8 лет', 4.9, $2, '+79780000002'),
+            ('Дмитрий Козлов', '10 лет', 4.7, $3, '+79780000003'),
+            ('Михаил Волков', '15 лет', 5.0, $4, '+79780000004')
         `, [busResult.rows[0].id, busResult.rows[1].id, busResult.rows[2].id, busResult.rows[3].id]);
 
         console.log('✅ Тестовые данные добавлены в PostgreSQL');
@@ -130,168 +167,6 @@ app.get('/', (req, res) => {
 app.get('/bus-selection', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'bus-selection.html'));
 });
-
-// IP-based middleware для Docker monitoring
-function dockerMonitoringAuth(req, res, next) {
-    // Для разработки разрешаем доступ с localhost и Docker network
-    const clientIp = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
-
-    console.log('🔍 Docker Monitor Access from IP:', clientIp);
-
-    // Разрешаем доступ для локальных запросов и Docker сети
-    const allowedPatterns = [
-        '127.0.0.1',
-        '::1',
-        '::ffff:127.0.0.1',
-        'localhost',
-        '172.', // Docker network range
-        '192.168.', // Local network
-    ];
-
-    const isAllowed = allowedPatterns.some(pattern =>
-        clientIp && clientIp.toString().includes(pattern)
-    );
-
-    if (isAllowed) {
-        return next();
-    }
-
-    console.log('❌ Access denied for IP:', clientIp);
-    res.status(403).json({ error: 'Access denied - Docker monitoring is restricted' });
-}
-
-// Docker Monitoring Dashboard Page
-app.get('/docker-monitor', dockerMonitoringAuth, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'docker-monitor.html'));
-});
-
-// API: Get all containers
-app.get('/api/docker/containers', dockerMonitoringAuth, async (req, res) => {
-    try {
-        const containers = await docker.listContainers({ all: true });
-        const detailedContainers = await Promise.all(
-            containers.map(async (container) => {
-                const containerObj = docker.getContainer(container.Id);
-                const stats = await containerObj.stats({ stream: false });
-                const inspect = await containerObj.inspect();
-
-                return {
-                    id: container.Id.substring(0, 12),
-                    name: container.Names[0].replace('/', ''),
-                    image: container.Image,
-                    state: container.State,
-                    status: container.Status,
-                    created: container.Created,
-                    stats: {
-                        cpu: calculateCPUPercent(stats),
-                        memory: calculateMemoryUsage(stats),
-                        network: calculateNetworkIO(stats)
-                    },
-                    ports: container.Ports
-                };
-            })
-        );
-
-        res.json(detailedContainers);
-    } catch (error) {
-        console.error('Docker API Error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// API: Get container logs
-app.get('/api/docker/logs/:id', dockerMonitoringAuth, async (req, res) => {
-    try {
-        const container = docker.getContainer(req.params.id);
-        const logs = await container.logs({
-            stdout: true,
-            stderr: true,
-            tail: 100,
-            timestamps: true
-        });
-
-        res.json({ logs: logs.toString('utf8') });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// API: Restart container
-app.post('/api/docker/restart/:id', dockerMonitoringAuth, async (req, res) => {
-    try {
-        const container = docker.getContainer(req.params.id);
-        await container.restart();
-        res.json({ message: 'Container restarted successfully' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// API: System info
-app.get('/api/docker/info', dockerMonitoringAuth, async (req, res) => {
-    try {
-        const info = await docker.info();
-        const version = await docker.version();
-
-        res.json({
-            containers: info.Containers,
-            containersRunning: info.ContainersRunning,
-            containersPaused: info.ContainersPaused,
-            containersStopped: info.ContainersStopped,
-            images: info.Images,
-            serverVersion: version.Version,
-            memTotal: (info.MemTotal / 1024 / 1024 / 1024).toFixed(2) + ' GB',
-            cpus: info.NCPU
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Helper functions for stats calculation
-function calculateCPUPercent(stats) {
-    if (!stats || !stats.cpu_stats || !stats.precpu_stats) return 0;
-
-    const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-    const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-    const cpuCount = stats.cpu_stats.online_cpus || 1;
-
-    if (systemDelta > 0 && cpuDelta > 0) {
-        return ((cpuDelta / systemDelta) * cpuCount * 100).toFixed(2);
-    }
-    return 0;
-}
-
-function calculateMemoryUsage(stats) {
-    if (!stats || !stats.memory_stats) return { used: 0, limit: 0, percent: 0 };
-
-    const used = stats.memory_stats.usage || 0;
-    const limit = stats.memory_stats.limit || 0;
-    const percent = limit > 0 ? ((used / limit) * 100).toFixed(2) : 0;
-
-    return {
-        used: (used / 1024 / 1024).toFixed(2) + ' MB',
-        limit: (limit / 1024 / 1024).toFixed(2) + ' MB',
-        percent: percent
-    };
-}
-
-function calculateNetworkIO(stats) {
-    if (!stats || !stats.networks) return { rx: '0 KB', tx: '0 KB' };
-
-    let rxBytes = 0;
-    let txBytes = 0;
-
-    Object.values(stats.networks).forEach(network => {
-        rxBytes += network.rx_bytes || 0;
-        txBytes += network.tx_bytes || 0;
-    });
-
-    return {
-        rx: (rxBytes / 1024).toFixed(2) + ' KB',
-        tx: (txBytes / 1024).toFixed(2) + ' KB'
-    };
-}
 
 // API для получения списка автобусов
 app.get('/api/buses', async (req, res) => {
@@ -344,17 +219,18 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
     try {
         // Сохраняем заказ в базу данных
         const orderResult = await pool.query(
-            `INSERT INTO orders (customer_name, customer_phone, from_location, to_location, trip_date, passengers_count, special_requests, bus_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            `INSERT INTO orders (customer_name, customer_phone, from_location, to_location, trip_date, passengers_count, special_requests, bus_id, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
             [
                 orderData.name,
                 orderData.phone,
                 orderData.from,
                 orderData.to,
-                orderData.dateTime,
+                `${orderData.date} ${orderData.time}`,
                 orderData.passengers,
                 orderData.request,
-                orderData.busId || null
+                orderData.busId || null,
+                true
             ]
         );
 
@@ -366,7 +242,11 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
         message += `📞 Телефон: ${orderData.phone}\n`;
         message += `📍 Откуда: ${orderData.from}\n`;
         message += `🎯 Куда: ${orderData.to}\n`;
-        message += `📅 Дата: ${orderData.dateTime}\n`;
+        if (orderData.distance) {
+            message += `📏 Расстояние: ${orderData.distance} км\n`;
+        }
+        message += `📅 Дата: ${orderData.date}\n`;
+        message += `⏰ Время: ${orderData.time}\n`;
         message += `👥 Пассажиры: ${orderData.passengers}\n`;
 
         // Если выбран автобус
@@ -384,11 +264,18 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
         message += ` Пожелания: ${orderData.request || 'нет'}\n`;
         message += `\n Время заказа: ${new Date().toLocaleString('ru-RU')}`;
 
-        // Отправляем в Telegram
-        await bot.sendMessage(CHAT_IT, message);
-        await bot.sendMessage(CHAT_ID, message);
-
-        console.log('✅ Сообщение успешно отправлено в Telegram');
+        // Отправляем в Telegram (если бот инициализирован)
+        if (bot && CHAT_IT && CHAT_ID) {
+            try {
+                await bot.sendMessage(CHAT_IT, message);
+                await bot.sendMessage(CHAT_ID, message);
+                console.log('✅ Сообщение успешно отправлено в Telegram');
+            } catch (error) {
+                console.error('❌ Ошибка отправки в Telegram:', error.message);
+            }
+        } else {
+            console.log('⚠️ Сообщение не отправлено в Telegram - бот не инициализирован или отсутствуют CHAT_ID');
+        }
         res.json({
             message: 'Заказ успешно отправлен! Мы свяжемся с вами в ближайшее время.',
             orderId: orderId
@@ -397,6 +284,62 @@ app.post('/api/orders', rateLimiter, async (req, res) => {
     } catch (error) {
         console.error('❌ Ошибка при обработке заказа:', error);
         res.status(500).json({ error: 'Ошибка при отправке заказа.' });
+    }
+});
+
+// API для сброса rate limits (для тестирования)
+app.get('/api/admin/reset-rate-limit', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM rate_limits');
+        console.log('✅ Rate limits сброшены');
+        res.json({ message: 'Rate limits успешно сброшены' });
+    } catch (error) {
+        console.error('❌ Ошибка при сбросе rate limits:', error);
+        res.status(500).json({ error: 'Ошибка при сбросе rate limits' });
+    }
+});
+
+// API для изменения статуса заказа
+app.patch('/api/orders/:id', async (req, res) => {
+    try {
+        const { status, is_active } = req.body;
+        const orderId = req.params.id;
+
+        const updateFields = [];
+        const updateValues = [];
+        let paramCount = 1;
+
+        if (status !== undefined) {
+            updateFields.push(`status = $${paramCount}`);
+            updateValues.push(status);
+            paramCount++;
+        }
+
+        if (is_active !== undefined) {
+            updateFields.push(`is_active = $${paramCount}`);
+            updateValues.push(is_active);
+            paramCount++;
+        }
+
+        if (updateFields.length === 0) {
+            return res.status(400).json({ error: 'Не указаны поля для обновления' });
+        }
+
+        updateValues.push(orderId);
+
+        const result = await pool.query(
+            `UPDATE orders SET ${updateFields.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+            updateValues
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Заказ не найден' });
+        }
+
+        res.json({ message: 'Статус заказа обновлен', order: result.rows[0] });
+    } catch (error) {
+        console.error('❌ Ошибка при обновлении заказа:', error);
+        res.status(500).json({ error: 'Ошибка при обновлении заказа' });
     }
 });
 

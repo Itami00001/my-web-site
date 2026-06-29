@@ -453,6 +453,150 @@ function initPriceCalculation() {
             }
         });
     }
+
+    // Обработка кнопки "Выбрать маршрут"
+    const selectRouteBtn = document.getElementById('selectRouteBtn');
+    if (selectRouteBtn) {
+        selectRouteBtn.addEventListener('click', () => {
+            openMapModal();
+        });
+    }
+}
+
+// Modal Map Logic
+let modalMap, modalRoute, modalFromPoint, modalToPoint;
+
+function initMapModal() {
+    const modal = document.getElementById('mapModal');
+    const closeBtn = document.getElementById('closeModalBtn');
+    const applyBtn = document.getElementById('modalApplyBtn');
+    const calculateBtn = document.getElementById('modalCalculateBtn');
+
+    if (!modal) return;
+
+    // Close modal
+    closeBtn.addEventListener('click', closeMapModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeMapModal();
+    });
+
+    // Apply route
+    applyBtn.addEventListener('click', () => {
+        const from = document.getElementById('modalFrom').value.trim();
+        const to = document.getElementById('modalTo').value.trim();
+
+        if (from && to) {
+            document.getElementById('from').value = from;
+            document.getElementById('to').value = to;
+            closeMapModal();
+            showNotification('Маршрут применён', 'success');
+        } else {
+            showNotification('Выберите маршрут на карте', 'error');
+        }
+    });
+
+    // Calculate route in modal
+    calculateBtn.addEventListener('click', () => {
+        calculateModalRoute();
+    });
+}
+
+function openMapModal() {
+    const modal = document.getElementById('mapModal');
+    modal.style.display = 'flex';
+
+    // Initialize modal map if not already done
+    if (!modalMap && typeof ymaps !== 'undefined') {
+        ymaps.ready(() => {
+            modalMap = new ymaps.Map('modalMap', {
+                center: [44.9521, 34.1024],
+                zoom: 9,
+                controls: ['zoomControl', 'searchControl']
+            });
+
+            // Handle clicks on modal map
+            modalMap.events.add('click', (e) => {
+                const coords = e.get('coords');
+                const fromInput = document.getElementById('modalFrom');
+                const toInput = document.getElementById('modalTo');
+
+                if (!modalFromPoint) {
+                    modalFromPoint = coords;
+                    ymaps.geocode(coords).then((res) => {
+                        const firstGeoObject = res.geoObjects.get(0);
+                        fromInput.value = firstGeoObject.getAddressLine();
+                        addModalMarker(coords, 'A');
+                    });
+                } else if (!modalToPoint) {
+                    modalToPoint = coords;
+                    ymaps.geocode(coords).then((res) => {
+                        const firstGeoObject = res.geoObjects.get(0);
+                        toInput.value = firstGeoObject.getAddressLine();
+                        addModalMarker(coords, 'B');
+                        document.getElementById('modalCalculateBtn').style.display = 'block';
+                    });
+                } else {
+                    clearModalRoute();
+                    modalFromPoint = coords;
+                    ymaps.geocode(coords).then((res) => {
+                        const firstGeoObject = res.geoObjects.get(0);
+                        fromInput.value = firstGeoObject.getAddressLine();
+                        addModalMarker(coords, 'A');
+                    });
+                }
+            });
+        });
+    }
+}
+
+function closeMapModal() {
+    const modal = document.getElementById('mapModal');
+    modal.style.display = 'none';
+    clearModalRoute();
+}
+
+function addModalMarker(coords, label) {
+    const placemark = new ymaps.Placemark(coords, {
+        iconContent: label
+    }, {
+        preset: 'islands#blackStretchyIcon'
+    });
+    modalMap.geoObjects.add(placemark);
+}
+
+function clearModalRoute() {
+    if (modalRoute) {
+        modalMap.geoObjects.remove(modalRoute);
+        modalRoute = null;
+    }
+    modalMap.geoObjects.removeAll();
+    modalFromPoint = null;
+    modalToPoint = null;
+    document.getElementById('modalFrom').value = '';
+    document.getElementById('modalTo').value = '';
+    document.getElementById('modalCalculateBtn').style.display = 'none';
+    document.getElementById('modalPriceCalculation').style.display = 'none';
+    document.getElementById('modalApplyBtn').style.display = 'none';
+}
+
+function calculateModalRoute() {
+    if (!modalFromPoint || !modalToPoint) return;
+
+    ymaps.route([modalFromPoint, modalToPoint], {
+        mapStateAutoApply: true,
+        avoidTrafficJams: false
+    }).then((res) => {
+        modalRoute = res;
+        modalMap.geoObjects.add(modalRoute);
+
+        const distance = res.getLength() / 1000;
+        document.getElementById('modalCalculatedDistance').textContent = distance.toFixed(1);
+        document.getElementById('modalPriceCalculation').style.display = 'block';
+        document.getElementById('modalApplyBtn').style.display = 'block';
+    }).catch((err) => {
+        console.error('Ошибка построения маршрута в модалке:', err);
+        showNotification('Не удалось построить маршрут', 'error');
+    });
 }
 
 function updatePrice(distance = null) {
